@@ -1,0 +1,183 @@
+from pathlib import Path
+import sys
+
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+
+# Allow imports from src/
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from src.forecasting import load_data, train_test_split_time_series
+from src.models import seasonal_naive_forecast
+from src.staffing import (
+    calculate_required_agents,
+    smooth_staffing_levels,
+    build_staffing_plan,
+)
+
+st.set_page_config(
+    page_title="Labor Forecasting Dashboard",
+    layout="wide",
+)
+
+
+
+
+@st.cache_data
+def prepare_dashboard_data(
+    agent_capacity_per_hour: int,
+    buffer_multiplier: float,
+    minimum_agents: int,
+    max_change_per_hour: int,
+) -> pd.DataFrame:
+    df = load_data()
+    train, test = train_test_split_time_series(df)
+
+    forecast = seasonal_naive_forecast(train, test, season_length=24)
+
+    staffing_recommendation = calculate_required_agents(
+        forecasted_demand=forecast,
+        agent_capacity_per_hour=agent_capacity_per_hour,
+        buffer_multiplier=buffer_multiplier,
+        minimum_agents=minimum_agents,
+    )
+
+    smoothed_staffing = smooth_staffing_levels(
+        staffing_levels=staffing_recommendation,
+        max_change_per_hour=max_change_per_hour,
+    )
+
+    staffing_df = build_staffing_plan(
+        test=test,
+        forecast=forecast,
+        staffing_recommendation=staffing_recommendation,
+        smoothed_staffing=smoothed_staffing,
+    )
+
+    return staffing_df
+
+
+def plot_dashboard_chart(staffing_df: pd.DataFrame) -> None:
+    plt.figure(figsize=(14, 6))
+
+    plt.plot(
+        staffing_df["timestamp"],
+        staffing_df["forecasted_demand"],
+        label="Forecasted Demand",
+    )
+    plt.plot(
+        staffing_df["timestamp"],
+        staffing_df["recommended_agents"],
+        label="Recommended Agents",
+        linestyle="--",
+    )
+    plt.plot(
+        staffing_df["timestamp"],
+        staffing_df["smoothed_agents"],
+        label="Smoothed Agents",
+        linewidth=2,
+    )
+
+    plt.title("Forecasted Demand vs Staffing Recommendations")
+    plt.xlabel("Timestamp")
+    plt.ylabel("Demand / Agents")
+    plt.legend()
+    plt.tight_layout()
+
+    st.pyplot(plt.gcf())
+    plt.close()
+
+
+def main() -> None:
+    st.title("Labor Forecasting & Staffing Dashboard")
+    st.markdown(
+        "Interactive workforce planning dashboard for a call center using "
+        "hourly demand forecasting, staffing recommendations, and schedule smoothing."
+    )
+
+    st.markdown("""
+    ### Workforce Forecasting Simulator
+
+    This dashboard simulates a call center workforce planning system by:
+
+    • Forecasting hourly demand using time-series models  
+    • Translating forecasts into staffing requirements  
+    • Applying smoothing rules to produce realistic schedules  
+
+    Use the controls on the left to explore how operational assumptions impact staffing needs.
+    """)
+
+    st.sidebar.header("Scenario Controls")
+
+    agent_capacity = st.sidebar.slider(
+        "Agent Capacity per Hour", min_value=4, max_value=15, value=8, step=1
+    )
+
+    buffer_multiplier = st.sidebar.slider(
+        "Buffer Multiplier", min_value=1.00, max_value=1.50, value=1.15, step=0.01
+    )
+
+    minimum_agents = st.sidebar.slider(
+        "Minimum Agents", min_value=1, max_value=10, value=2, step=1
+    )
+
+    max_change_per_hour = st.sidebar.slider(
+        "Max Staffing Change per Hour", min_value=1, max_value=5, value=1, step=1
+    )
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.markdown("""
+    ### Model Assumptions
+
+    **Agent Capacity:**  
+    Calls handled per agent per hour.
+
+    **Buffer Multiplier:**  
+    Extra staffing buffer for variability.
+
+    **Minimum Agents:**  
+    Minimum operational staffing level.
+
+    **Max Staffing Change:**  
+    Limits how quickly staffing can change between hours.
+    """)
+
+    staffing_df = prepare_dashboard_data(
+        agent_capacity_per_hour=agent_capacity,
+        buffer_multiplier=buffer_multiplier,
+        minimum_agents=minimum_agents,
+        max_change_per_hour=max_change_per_hour,
+    )
+
+    avg_forecast = staffing_df["forecasted_demand"].mean()
+    avg_agents = staffing_df["recommended_agents"].mean()
+    peak_smoothed_agents = staffing_df["smoothed_agents"].max()
+    total_staff_hours = staffing_df["smoothed_agents"].sum()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Avg Forecasted Demand", f"{avg_forecast:.2f}")
+    c2.metric("Avg Recommended Agents", f"{avg_agents:.2f}")
+    c3.metric("Peak Smoothed Agents", f"{peak_smoothed_agents}")
+    c4.metric("Total Staff Hours", f"{total_staff_hours:.0f}")
+
+    st.subheader("Forecast and Staffing Overview")
+    plot_dashboard_chart(staffing_df)
+
+    st.subheader("Staffing Plan Preview")
+    st.dataframe(staffing_df, use_container_width=True)
+
+    csv_data = staffing_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download staffing plan CSV",
+        data=csv_data,
+        file_name="staffing_plan.csv",
+        mime="text/csv",
+    )
+
+
+if __name__ == "__main__":
+    main()

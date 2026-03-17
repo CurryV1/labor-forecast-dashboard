@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from models import naive_forecast, seasonal_naive_forecast, rolling_mean_forecast
+from src.models import naive_forecast, seasonal_naive_forecast, rolling_mean_forecast
 
 
 def load_data(file_path: str = "data/hourly_demand.csv") -> pd.DataFrame:

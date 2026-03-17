@@ -4,8 +4,8 @@ from cProfile import label
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from models import seasonal_naive_forecast
-from forecasting import load_data, train_test_split_time_series
+from src.models import seasonal_naive_forecast
+from src.forecasting import load_data, train_test_split_time_series
 
 def calculate_required_agents(
         forecasted_demand: pd.Series,
